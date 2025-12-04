@@ -531,11 +531,11 @@ class VectorizedLocalMap(object):
         vectors = []
         for vec_class in self.vec_classes:
             if vec_class == 'divider':
-                line_geom = self.get_map_geom(patch_box, patch_angle, self.line_classes, location)
+                line_geom = self.get_map_geom(patch_box, patch_angle, self.line_classes, location)  # 存的是图层和line
                 line_instances_dict = self.line_geoms_to_instances(line_geom)     
                 for line_type, instances in line_instances_dict.items():
                     for instance in instances:
-                        vectors.append((instance, self.CLASS2LABEL.get(line_type, -1)))
+                        vectors.append((instance, self.CLASS2LABEL.get(line_type, -1)))     # -1是默认值，找不到时返回-1
             elif vec_class == 'ped_crossing':
                 ped_geom = self.get_map_geom(patch_box, patch_angle, self.ped_crossing_classes, location)
                 # ped_vector_list = self.ped_geoms_to_vectors(ped_geom)
@@ -564,7 +564,7 @@ class VectorizedLocalMap(object):
                 gt_instance.append(instance)
                 gt_labels.append(type)
         
-        gt_instance = LiDARInstanceLines(gt_instance,self.sample_dist,
+        gt_instance = LiDARInstanceLines(gt_instance,self.sample_dist,                                      # 激光雷达系下的道路向量list
                         self.num_samples, self.padding, self.fixed_num,self.padding_value, patch_size=self.patch_size)
 
         anns_results = dict(
@@ -822,18 +822,20 @@ class VectorizedLocalMap(object):
         patch_x = patch_box[0]
         patch_y = patch_box[1]
 
-        patch = self.map_explorer[location].get_patch_coord(patch_box, patch_angle)
+        patch = self.map_explorer[location].get_patch_coord(patch_box, patch_angle) # 提取沿道路方向的长方形区域(考虑了航向)
 
         line_list = []
-        records = getattr(self.map_explorer[location].map_api, layer_name)
-        for record in records:
-            line = self.map_explorer[location].map_api.extract_line(record['line_token'])
+        records = getattr(self.map_explorer[location].map_api, layer_name)      # 通过反射机制获取指定图层的数据记录
+        for record in records:                                                  # 遍历每条记录，
+            line = self.map_explorer[location].map_api.extract_line(record['line_token'])   # 通过line_token提取实际的几何线
             if line.is_empty:  # Skip lines without nodes.
                 continue
 
-            new_line = line.intersection(patch)
+            new_line = line.intersection(patch)     # 只保留在区域内的部分
             if not new_line.is_empty:
+                # 1. 反向旋转：将线从旋转后的区域转回未旋转状态
                 new_line = affinity.rotate(new_line, -patch_angle, origin=(patch_x, patch_y), use_radians=False)
+                # 2. 平移：将坐标原点移动到区域中心
                 new_line = affinity.affine_transform(new_line,
                                                      [1.0, 0.0, 0.0, 1.0, -patch_x, -patch_y])
                 line_list.append(new_line)
@@ -1108,7 +1110,7 @@ class VADCustomNuScenesDataset(NuScenesDataset):
         else:
             gt_vecs_pts_loc = to_tensor(anns_results['gt_vecs_pts_loc'])
             try:
-                gt_vecs_pts_loc = gt_vecs_pts_loc.flatten(1).to(dtype=torch.float32)
+                gt_vecs_pts_loc = gt_vecs_pts_loc.flatten(1).to(dtype=torch.float32)    # flatten(1)：从第1维（索引1）开始展平
             except:
                 # empty tensor, will be passed in train, 
                 # but we preserve it for test
