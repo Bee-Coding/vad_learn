@@ -1123,25 +1123,36 @@ class VADCustomNuScenesDataset(NuScenesDataset):
 
     def prepare_train_data(self, index):
         """
-        Training data preparation.
+        Training data preparation.  为指定索引准备训练数据，包含时序数据增强（多帧数据）
         Args:
             index (int): Index for accessing the target data.
         Returns:
             dict: Training data dict of the corresponding index.
         """
-        data_queue = []
+        data_queue = []     # 这个队列将存储当前帧和多个历史帧的数据
 
-        # temporal aug
-        prev_indexs_list = list(range(index-self.queue_length, index))
-        random.shuffle(prev_indexs_list)
+        # temporal aug  时序增强（temporal augmentation）
+        """ 
+        # 时序增强设计意图：
+        # 1. 增加数据多样性:不是总是使用连续的3帧
+        # 2. 模拟现实情况：传感器可能漏帧或丢帧
+        # 3. 提高模型鲁棒性：让模型学会处理不完整的时序信息
+        # 4. 随机性增强：通过随机丢弃，增加训练样本的多样性
+        """
+        prev_indexs_list = list(range(index-self.queue_length, index))      # 生成历史帧索引列表，从 index-queue_length 到 index-1
+        random.shuffle(prev_indexs_list)                                    # 随机打乱历史帧索引顺序
         prev_indexs_list = sorted(prev_indexs_list[1:], reverse=True)
-        ##
+        ##  # 1. prev_indexs_list[1:]: 排除第一个元素（最早的历史帧）
+            # 2. sorted(..., reverse=True): 按降序排序，确保时间最近的帧在前
+            # 3. 最终得到：时间最近的帧排在前面，时间最远的帧排在后面
 
+        # 获取当前帧的数据信息
         input_dict = self.get_data_info(index)
         if input_dict is None:
-            return None
-        frame_idx = input_dict['frame_idx']
-        scene_token = input_dict['scene_token']
+            return None             # 如果数据无效，返回None
+        # 提取关键信息用于后续检查
+        frame_idx = input_dict['frame_idx']     # 当前帧的时间索引
+        scene_token = input_dict['scene_token'] # 当前场景的标识符
         self.pre_pipeline(input_dict)
         example = self.pipeline(input_dict)
         example = self.vectormap_pipeline(example,input_dict)
@@ -1151,21 +1162,25 @@ class VADCustomNuScenesDataset(NuScenesDataset):
             return None
         data_queue.insert(0, example)
         for i in prev_indexs_list:
-            i = max(0, i)
+            i = max(0, i)    # 确保索引不小于0（处理边界情况）
             input_dict = self.get_data_info(i)
             if input_dict is None:
-                return None
+                return None     # 如果历史帧数据无效，整个序列无效
+             # 检查历史帧与当前帧是否属于同一场景且时间顺序正确
             if input_dict['frame_idx'] < frame_idx and input_dict['scene_token'] == scene_token:
+                # 预处理历史帧
                 self.pre_pipeline(input_dict)
                 example = self.pipeline(input_dict)
                 example = self.vectormap_pipeline(example,input_dict)
+                # 如果启用空标注过滤，检查当前帧是否有有效标注   空标注过滤（历史帧）
                 if self.filter_empty_gt and \
                         (example is None or ~(example['gt_labels_3d']._data != -1).any()) and \
                             (example is None or ~(example['map_gt_labels_3d']._data != -1).any()):
                     return None
                 frame_idx = input_dict['frame_idx']
-            data_queue.insert(0, copy.deepcopy(example))
-        return self.union2one(data_queue)
+            # 将当前帧数据插入队列开头
+            data_queue.insert(0, copy.deepcopy(example))     # 最终队列顺序：历史帧（按时间顺序） + 当前帧   使用深拷贝，确保每个帧的数据独立
+        return self.union2one(data_queue)                   # 将队列中的所有帧数据合并成一个数据
 
     def prepare_test_data(self, index):
         """Prepare data for testing.
