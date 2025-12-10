@@ -284,12 +284,12 @@ class VADHead(DETRHead):
         self.loss_plan_dir = build_loss(loss_plan_dir)
 
     def _init_layers(self):
-        """Initialize classification branch and regression branch of head."""
+        """Initialize classification branch and regression branch of head."""   # 初始化头部的分类分支和回归分支。
         cls_branch = []
         for _ in range(self.num_reg_fcs):
-            cls_branch.append(Linear(self.embed_dims, self.embed_dims))
-            cls_branch.append(nn.LayerNorm(self.embed_dims))
-            cls_branch.append(nn.ReLU(inplace=True))
+            cls_branch.append(Linear(self.embed_dims, self.embed_dims)) # 线性层，全连接层
+            cls_branch.append(nn.LayerNorm(self.embed_dims))    # 层归一化，公式(x - mean) / sqrt(var + eps)
+            cls_branch.append(nn.ReLU(inplace=True))            # 激活函数ReLU
         cls_branch.append(Linear(self.embed_dims, self.cls_out_channels))
         cls_branch = nn.Sequential(*cls_branch)
 
