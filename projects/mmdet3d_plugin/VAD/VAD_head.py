@@ -73,9 +73,9 @@ class LaneNet(nn.Module):
 class VADHead(DETRHead):
     """Head of VAD model.
     Args:
-        with_box_refine (bool): Whether to refine the reference points
+        with_box_refine (bool): Whether to refine the reference points      # 是否细化解码器中的参考点
             in the decoder. Defaults to False.
-        as_two_stage (bool) : Whether to generate the proposal from
+        as_two_stage (bool) : Whether to generate the proposal from         # 是否根据编码器的输出生成提案。
             the outputs of encoder.
         transformer (obj:`ConfigDict`): ConfigDict is used for building
             the Encoder and Decoder.

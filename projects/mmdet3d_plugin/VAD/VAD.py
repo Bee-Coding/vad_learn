@@ -47,20 +47,20 @@ class VAD(MVXTwoStageDetector):
             True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
-        self.fut_ts = fut_ts
-        self.fut_mode = fut_mode
+        self.fut_ts = fut_ts                                                            # 预测的未来时间步数 (如6步，对应3秒)
+        self.fut_mode = fut_mode                                                        # 预测的多模态数 (如6种可能意图)
         self.valid_fut_ts = pts_bbox_head['valid_fut_ts']
 
         # temporal
         self.video_test_mode = video_test_mode
-        self.prev_frame_info = {
+        self.prev_frame_info = {                                                        # 存储上一帧信息，用于时序融合
             'prev_bev': None,
             'scene_token': None,
             'prev_pos': 0,
             'prev_angle': 0,
         }
 
-        self.planning_metric = None
+        self.planning_metric = None                                                     # 规划评估指标计算器
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
@@ -121,6 +121,8 @@ class VAD(MVXTwoStageDetector):
                           ego_fut_cmd=None,
                           ego_lcf_feat=None,
                           gt_attr_labels=None):
+        # 流程： [输入多帧图像序列] --> [提取历史帧BEV特征] --> [提取当前帧图像特征]  --> [调用pts_bbox_head（核心）]  --> [计算总损失（感知+预测+规划）]
+
         """Forward function'
         Args:
             pts_feats (list[torch.Tensor]): Features of point cloud branch

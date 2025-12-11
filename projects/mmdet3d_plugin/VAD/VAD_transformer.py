@@ -443,7 +443,7 @@ class VADPerceptionTransformer(BaseModule):
 
         # 地图解码（检测地图元素）
         if self.map_decoder is not None:
-            # [L, Q, B, D], [L, B, Q, D]
+            # [L, Q, B, D], [L, B, Q, D]    L代表解码器层的数量即num_layers
             map_inter_states, map_inter_references = self.map_decoder(
                 query=map_query,            # 地图查询
                 key=None,                   # 不使用额外的key
