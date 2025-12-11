@@ -77,41 +77,43 @@ class VADHead(DETRHead):
             in the decoder. Defaults to False.
         as_two_stage (bool) : Whether to generate the proposal from         # 是否根据编码器的输出生成提案。
             the outputs of encoder.
-        transformer (obj:`ConfigDict`): ConfigDict is used for building
+        transformer (obj:`ConfigDict`): ConfigDict is used for building     # ConfigDict用于构建编码器和解码器。
             the Encoder and Decoder.
-        bev_h, bev_w (int): spatial shape of BEV queries.
+        bev_h, bev_w (int): spatial shape of BEV queries.                   # BEV查询的空间形状。
     """
     def __init__(self,
-                 *args,
-                 with_box_refine=False,
-                 as_two_stage=False,
-                 transformer=None,
-                 bbox_coder=None,
-                 num_cls_fcs=2,
-                 code_weights=None,
-                 bev_h=30,
+                 *args,                                                     # 传递给父类 DETRHead 的参数（如 num_query, num_classes）。
+                 with_box_refine=False,                                     # 是否在解码器每一层迭代细化预测的边界框参考点，提升定位精度。
+                 as_two_stage=False,                                        # 是否采用两阶段范式（先由编码器生成初始提案，再由解码器细化）
+                 transformer=None,                                          # 整个模型最核心的Transformer架构配置（编码器、解码器层数、注意力头数等）
+                 bbox_coder=None,                                           # 3D边界框的编码/解码器配置，定义如何将框的参数（中心、尺寸、朝向）编码为网络预测的向量，以及反向解码
+                 num_cls_fcs=2,                                             # 分类头中全连接层的数量
+                 code_weights=None,                                         # 为边界框各项回归参数（如 dx, dy, dz, dw, dh, dl, rot）分配的损失权重。
+                 bev_h=30,                                                  # BEV（鸟瞰图）特征图的空间分辨率 bev_h*bev_w（30x30）
                  bev_w=30,
-                 fut_ts=6,
-                 fut_mode=6,
-                 loss_traj=dict(type='L1Loss', loss_weight=0.25),
-                 loss_traj_cls=dict(
-                     type='FocalLoss',
+                 # 预测任务参数
+                 fut_ts=6,                                                  # 预测的未来时间步数（6步，通常对应3秒，每秒2帧）
+                 fut_mode=6,                                                # 预测的多模态轨迹数量（6种可能的未来意图）
+                 loss_traj=dict(type='L1Loss', loss_weight=0.25),           # 轨迹点回归损失 (为了回归真值即专家数据)
+                 loss_traj_cls=dict(                                        # 多模态轨迹的分类（置信度）损失
+                     type='FocalLoss',                                      # Focal Loss，用于处理正负样本不平衡）
                      use_sigmoid=True,
                      gamma=2.0,
                      alpha=0.25,
                      loss_weight=0.8),
-                 map_bbox_coder=None,
-                 map_num_query=900,
-                 map_num_classes=3,
-                 map_num_vec=20,
-                 map_num_pts_per_vec=2,
-                 map_num_pts_per_gt_vec=2,
-                 map_query_embed_type='all_pts',
-                 map_transform_method='minmax',
-                 map_gt_shift_pts_pattern='v0',
-                 map_dir_interval=1,
-                 map_code_size=None,
-                 map_code_weights=None,
+                 # 建图任务参数
+                 map_bbox_coder=None,                                       # 地图元素（车道线等）的编码器，可能不同于物体检测的编码器
+                 map_num_query=900,                                         # 地图查询的总数（默认是900， 实际是map_num_vec*map_num_pts_per_vec = 40）
+                 map_num_classes=3,                                         # 地图元素的类别数（3：车道线、人行横道、道路边界）
+                 map_num_vec=20,                                            # 预测的地图实例数量（20个）
+                 map_num_pts_per_vec=2,                                     # 每个地图实例用多少个点表示（2个点构成一条线段）。因此总查询数 900 = 20 * 2 * (每个点需要的查询维度)
+                 map_num_pts_per_gt_vec=2,                                  # gt = Ground Truth真值，每条车道只选首尾两个点
+                 map_query_embed_type='all_pts',                            # 沒太懂，嵌入类型：all_pts，instance_pts：先预测实例中心，再预测相对偏移
+                 map_transform_method='minmax',                             # 将地图点的归一化坐标转换回真实物理坐标的方法（坐标解码）
+                 map_gt_shift_pts_pattern='v0',                             # 对真实地图点进行数据增强（移位）的模式版本号，为了增加数据多样性，增强模型鲁棒性
+                 map_dir_interval=1,                                        # 计算地图向量方向（Direction）的间隔。
+                 map_code_size=None,                                        # 2
+                 map_code_weights=None,                                     # [1.0, 1.0, 1.0, 1.0]
                 loss_map_cls=dict(
                      type='CrossEntropyLoss',
                      bg_cls_weight=0.1,
@@ -133,14 +135,15 @@ class VADHead(DETRHead):
                  map_thresh=0.5,
                  dis_thresh=0.2,
                  pe_normalization=True,
-                 ego_his_encoder=None,
-                 ego_fut_mode=3,
-                 loss_plan_reg=dict(type='L1Loss', loss_weight=0.25),
-                 loss_plan_bound=dict(type='PlanMapBoundLoss', loss_weight=0.1),
-                 loss_plan_col=dict(type='PlanAgentDisLoss', loss_weight=0.1),
-                 loss_plan_dir=dict(type='PlanMapThetaLoss', loss_weight=0.1),
-                 ego_agent_decoder=None,
-                 ego_map_decoder=None,
+                 # 规划任务参数 (核心)
+                 ego_his_encoder=None,                                                      # 自车历史轨迹编码器，将过去轨迹编码为特征
+                 ego_fut_mode=3,                                                            # 规划轨迹的模态数（3：直行、左转、右转，与驾驶命令对应）
+                 loss_plan_reg=dict(type='L1Loss', loss_weight=0.25),                       # 模仿学习损失，使预测轨迹接近专家（真值）轨迹。
+                 loss_plan_bound=dict(type='PlanMapBoundLoss', loss_weight=0.1),            # 边界约束，惩罚压道路边界的轨迹。
+                 loss_plan_col=dict(type='PlanAgentDisLoss', loss_weight=0.1),              # 碰撞约束，惩罚与其他智能体过近的轨迹。
+                 loss_plan_dir=dict(type='PlanMapThetaLoss', loss_weight=0.1),              # 方向约束，使轨迹方向与车道方向一致。
+                 ego_agent_decoder=None,                                                    # 规划Transformer动态交互层，让自车查询与Agent查询交互以学习避障。
+                 ego_map_decoder=None,                                                      # 规划Transformer静态交互层，让自车查询与Map查询交互以学习道路结构。
                  query_thresh=None,
                  query_use_fix_pad=None,
                  ego_lcf_feat_idx=None,
@@ -171,25 +174,25 @@ class VADHead(DETRHead):
         self.valid_fut_ts = valid_fut_ts
 
         if loss_traj_cls['use_sigmoid'] == True:
-            self.traj_num_cls = 1
+            self.traj_num_cls = 1           # 二分类，输出一个分数
         else:
-          self.traj_num_cls = 2
+          self.traj_num_cls = 2             # 多分类，输出类别数
 
         self.with_box_refine = with_box_refine
         self.as_two_stage = as_two_stage
         if self.as_two_stage:
             transformer['as_two_stage'] = self.as_two_stage
         if 'code_size' in kwargs:
-            self.code_size = kwargs['code_size']
+            self.code_size = kwargs['code_size']        # 边界框编码后的向量长度
         else:
-            self.code_size = 10
+            self.code_size = 10                         # 默认是10， x,y,z, len,width,hight, sin,cos(朝向), vx,vy
         if code_weights is not None:
-            self.code_weights = code_weights
-        else:
+            self.code_weights = code_weights            # 为每个参数设定回归损失权重，尺寸和朝向的权重通常较小（0.2）。
+        else:                                           # [w_x,w_y,w_z, w_len,w_width,w_hight, w_sin,w_cos(朝向), w_vx,w_vy]
             self.code_weights = [1.0, 1.0, 1.0,
-                                 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2]
+                                 1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2]     
         if map_code_size is not None:
-            self.map_code_size = map_code_size
+            self.map_code_size = map_code_size          # 地图编码长度 2：x,y
         else:
             self.map_code_size = 10
         if map_code_weights is not None:
@@ -199,20 +202,20 @@ class VADHead(DETRHead):
                                  1.0, 1.0, 1.0, 1.0, 1.0, 0.2, 0.2]
 
         self.bbox_coder = build_bbox_coder(bbox_coder)
-        self.pc_range = self.bbox_coder.pc_range
-        self.real_w = self.pc_range[3] - self.pc_range[0]
-        self.real_h = self.pc_range[4] - self.pc_range[1]
-        self.num_cls_fcs = num_cls_fcs - 1
+        self.pc_range = self.bbox_coder.pc_range            # post_center_range
+        self.real_w = self.pc_range[3] - self.pc_range[0]   # 40m 左右各20
+        self.real_h = self.pc_range[4] - self.pc_range[1]   # 70m 左右各35
+        self.num_cls_fcs = num_cls_fcs - 1                  # 1层全连接层
 
         self.map_bbox_coder = build_bbox_coder(map_bbox_coder)
         self.map_query_embed_type = map_query_embed_type
         self.map_transform_method = map_transform_method
         self.map_gt_shift_pts_pattern = map_gt_shift_pts_pattern
         map_num_query = map_num_vec * map_num_pts_per_vec
-        self.map_num_query = map_num_query
-        self.map_num_classes = map_num_classes
-        self.map_num_vec = map_num_vec
-        self.map_num_pts_per_vec = map_num_pts_per_vec
+        self.map_num_query = map_num_query                  # 40个
+        self.map_num_classes = map_num_classes              # 3类
+        self.map_num_vec = map_num_vec                      # 20 每张地图20个向量
+        self.map_num_pts_per_vec = map_num_pts_per_vec      # 2 每个vector包含2个点
         self.map_num_pts_per_gt_vec = map_num_pts_per_gt_vec
         self.map_dir_interval = map_dir_interval
 
@@ -229,7 +232,10 @@ class VADHead(DETRHead):
                 f'{type(map_class_weight)}.'
             # NOTE following the official DETR rep0, bg_cls_weight means
             # relative classification weight of the no-object class.
-            map_bg_cls_weight = loss_map_cls.get('bg_cls_weight', map_class_weight)
+            # 背景类是什么？：在地图检测任务中，模型会输出很多预测的“地图元素”。
+            # 那些没有匹配到任何真实地图元素的预测，就被归类为“背景”（负样本）。
+            # 由于负样本数量通常远多于正样本，需要调整其权重以避免模型将所有预测都偏向背景。
+            map_bg_cls_weight = loss_map_cls.get('bg_cls_weight', map_class_weight)         # 地图背景类别权重，gb：背景
             assert isinstance(map_bg_cls_weight, float), 'Expected ' \
                 'bg_cls_weight to have type float. Found ' \
                 f'{type(map_bg_cls_weight)}.'
@@ -266,7 +272,7 @@ class VADHead(DETRHead):
                 'The regression l1 weight for map pts loss and matcher should be' \
                 'exactly the same.'
 
-            self.map_assigner = build_assigner(map_assigner)
+            self.map_assigner = build_assigner(map_assigner)            # 使用匈牙利匹配
             # DETR sampling=False, so use PseudoSampler
             sampler_cfg = dict(type='PseudoSampler')
             self.map_sampler = build_sampler(sampler_cfg, context=self)
